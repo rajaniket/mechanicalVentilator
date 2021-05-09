@@ -29,14 +29,18 @@ float smooth_flow;
 const int rs = 26, en = 27, d4 = 25, d5 = 24, d6 = 23, d7 = 22;  // lcd pins
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
-// variable for sending data to master device
+// array for sending data to master device
 uint8_t table[4];
 
 int control = 0;
 #define alarm 42  // for alarm
 // Defining pin for encoder
-int CLK3 = 30 , CLK2=5 , CLK1=7;
-int DT3 = 4 , DT2=6 , DT1=8;
+#define CLK3 30
+#define CLK2 5
+#define CLK1 7
+#define DT3 4
+#define DT2 6
+#define DT1 8
 
 // input parameter 
 int BPM=15, PEEP=5,MODE=0,TV=300;
@@ -78,12 +82,31 @@ void setup()
     attachInterrupt(1,Mode2,FALLING); // for mode 2
     Serial.begin(9600);
     mySerial.begin(9600);
+    //bmp280 init
+    Serial.println("Starting BMP280 device 1...");
+    if (!bmp1.begin()) {
+        Serial.println("Sensor BMP280 device 1 was not found.");
+        while (1);
+    }
+    Serial.println("Initialize BMP280 1 completed.");
+    delay(500);
+    Serial.println("Starting BMP280 device 2...");
+    if (!bmp2.begin()) {
+      Serial.println("Sensor BMP280 device 2 was not found.");
+      while (1);
+    }
+    Serial.println("Initialize BMP280 2 completed.");
+    delay(500);
+ 
+
+
     // Creating beep sound when is ready to use
     digitalWrite(alarm,HIGH);
     delay(1000);
     digitalWrite(alarm,LOW);
 }
 
+// Main Loop
 void loop()
 {
     // **** For I to E Ratio *******
@@ -214,12 +237,48 @@ void loop()
     text = "";
     temp=false;
   }
-    
 
+  //pressure Sensor
+  pa1 = bmp1.readPressure()/100; //in pa
+  pa2 = bmp2.readPressure()/100;
+  smooth_pa1 = (alpha * pa1 + (1 - alpha) * smooth_pa1); //exponential smoothing
+  smooth_pa2 = (alpha * pa2 + (1 - alpha) * smooth_pa2); //exponential smoothing
+  float currPr = (0.1437*smooth_pa2) - 144.4009; 
+  float assist = (currPr*50)+24;
+  Serial.println(assist+8);
+  
+  // finding flow using diffferential pressure technique
+  if(smooth_pa1 >= smooth_pa2){
+    flow = m*sqrt(smooth_pa1-smooth_pa2);
+  }
+  if(smooth_pa2 > smooth_pa1){
+    flow = -m*sqrt(smooth_pa2-smooth_pa1);
+  }
+  smooth_flow = (alpha * flow + (1 - alpha) * smooth_flow);
+
+  // transmitting pressure and air flow data 
+  //PEEP,PIP, Plative, volume,pressure,flow
+  String y = String(PEEP)+","+"25"+","+"22"+","+"600"+","+String(assist+8)+","+String((smooth_flow+36)*100)+"\n";
+  int i=0;
+  while(y[i]!='\n'){
+    mySerial.write(y[i]); //tv, ie, bpm ,alarm
+    i++;
+  }
+  mySerial.write("\n"); // for writinng in bluetoot module
 }
 
 
 void printData(){ // this function for printing data on lcd
+    // sending parameter data 
+    int i=0;
+    String x = String(TV) + "," +String(IE)+","+String(BPM)+","+"1"+"\n"; 
+    while(x[i]!='\n'){
+    mySerial.write(x[i]); //tv, ie, bpm ,alarm
+    i++;
+    }
+    mySerial.write("\n");// for sending data to bt 
+    
+    // Printing input data to lcd
     lcd.clear();
     lcd.setCursor(0,0);
     lcd.print("I:E");
@@ -238,17 +297,40 @@ void printData(){ // this function for printing data on lcd
 }
 
 void sendData(){
-    //called on request of master
+    //Sending data to master device
+    table[0]=(TV>>8)&0xFF;  
+    table[1]=TV&0xFF;
+    table[2]=(BPM>>8)&0xFF;
+    table[3]=BPM&0xFF;
+    table[4]=(IE>>8)&0xFF;
+    table[5]=IE&0xFF;
+    Wire.write(table,6);
+    delayMicroseconds(10);
 }
 
 void playPause(){
     // for stop/run the motor
+    Serial.println("Play/Pause");
+    lcd.clear();
+    lcd.print("PLAY/PAUSE");
+    digitalWrite(44,HIGH);
+    delay(10); 
+    digitalWrite(44,LOW);
+    // this digital pin 44 interupt master device to stop motor
 }
 
 void Mode1(){
     // called when mode-1 button is pressed
+    Serial.println("Mode-1");
+    lcd.clear();
+    lcd.print("Mode-1");
+    // in progress......
 }
 
 void Mode2(){
     // called when mode-2 button is pressed
+    Serial.println("Mode-2");
+    lcd.clear();
+    lcd.print("Mode-2");
+    // in progress.....
 }
